@@ -55,7 +55,7 @@ def is_dns_answer(data):
     # Basic check on the response code (RCODE should be 0 for no error)
     rcode = flags & 0x000F
     if rcode != 0:
-        ... # print(f"Warning: Response code is {rcode}")
+        ...  # print(f"Warning: Response code is {rcode}")
 
     # Attempt to parse the question section (basic parsing, no compression handling)
     pointer = 12
@@ -91,7 +91,8 @@ def is_dns_answer(data):
 
             if pointer + 10 > len(data):
                 return False
-            atype, aclass, ttl, rdlength = struct.unpack("!2HIH", data[pointer:pointer+10])
+            atype, aclass, ttl, rdlength = struct.unpack(
+                "!2HIH", data[pointer:pointer+10])
             pointer += 10
 
             if pointer + rdlength > len(data):
@@ -211,7 +212,7 @@ def process_endpoints(endpoints):
     processed_endpoints = []
     for endpoint in endpoints:
         parts = endpoint.split(":")
-        if len(parts) == 2 and parts[0].strip() and parts[1].isnumeric():
+        if len(parts) == 2 and parts[0].strip() and parts[1].isnumeric() and 0 < int(parts[1]) < 65536:
             processed_endpoints.append(parts)
         else:
             raise ValueError("Invalid endpoints")
