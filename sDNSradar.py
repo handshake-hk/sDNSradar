@@ -230,7 +230,7 @@ def main():
         metavar="SERVERS",
         type=str,
         nargs="*",
-        help="List of DoH endpoint addresses in the format 'host:port' (e.g., 1.1.1.1:443, cloudflare-dns.com:443).",
+        help="List of endpoints to be checked in the format 'host:port' (e.g., 1.1.1.1:443, cloudflare-dns.com:443).",
     )
     parser.add_argument(
         "-d",
