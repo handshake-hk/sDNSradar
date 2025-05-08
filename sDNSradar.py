@@ -69,18 +69,17 @@ def create_dns_query(domain):
 
 
 def check_doh_multiple_ips(endpoints, domain, results):
-    for endpoint in endpoints:
-        host, port = endpoint
+    for host, port in endpoints:
         print(f"{CYAN}Checking {host} on port {port} for DoH service...{RESET}")
         try:
             valid_doh = send_doh_request(host, domain, port)
         except requests.exceptions.RequestException as e:
             print(f"{YELLOW}[*] Error contacting {host}:{port}: {e}{RESET}")
-            results["error"].append(f"{host}:{port} (Unexpected Error)")
+            results["error"].append(f"{host}:{port}")
         except Exception as e:
             print(
                 f"{RED}[-] An unexpected error occurred while checking {host}:{port}: {e}{RESET}")
-            results["error"].append(f"{host}:{port} (Unexpected Error)")
+            results["error"].append(f"{host}:{port}")
         else:
             if valid_doh:
                 print(
