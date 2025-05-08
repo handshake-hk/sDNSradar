@@ -23,6 +23,7 @@
 # SOFTWARE.
 
 import json
+import struct
 import requests
 import argparse
 
@@ -33,6 +34,77 @@ CYAN = '\033[36m'
 RESET = '\033[0m'
 
 
+def is_dns_answer(data):
+    if len(data) < 12:
+        return False
+
+    header = struct.unpack("!6H", data[:12])
+    message_id, flags, qdcount, ancount, nscount, arcount = header
+
+    # Check if it's a response (QR flag is set)
+    is_response = (flags >> 15) & 1
+    if not is_response:
+        return False
+
+    # Check if there are any answer records
+    if ancount == 0:
+        return False
+
+    # Basic check on the response code (RCODE should be 0 for no error)
+    rcode = flags & 0x000F
+    if rcode != 0:
+        ... # print(f"Warning: Response code is {rcode}")
+
+    # Attempt to parse the question section (basic parsing, no compression handling)
+    pointer = 12
+    try:
+        while data[pointer] != 0:
+            length = data[pointer]
+            if length > 63:  # Basic sanity check for label length
+                return False
+            pointer += length + 1
+        pointer += 1  # Null terminator for QNAME
+
+        # Unpack QTYPE and QCLASS
+        if pointer + 4 > len(data):
+            return False
+        qtype, qclass = struct.unpack("!2H", data[pointer:pointer+4])
+        pointer += 4
+
+        # Attempt to parse the answer section (very basic, assumes no compression)
+        for _ in range(ancount):
+            if pointer >= len(data):
+                return False
+
+            # Basic check for name
+            if (data[pointer] >> 6) == 0b11:  # It is a pointer
+                pointer += 2
+            else:
+                while data[pointer] != 0:
+                    length = data[pointer]
+                    if length > 63:
+                        return False
+                    pointer += length + 1
+                pointer += 1  # Null terminator
+
+            if pointer + 10 > len(data):
+                return False
+            atype, aclass, ttl, rdlength = struct.unpack("!2HIH", data[pointer:pointer+10])
+            pointer += 10
+
+            if pointer + rdlength > len(data):
+                return False
+            pointer += rdlength
+
+        # If we have reached this point without major errors, it is likely a DNS answer
+        return True
+
+    except struct.error:
+        return False
+    except IndexError:
+        return False
+
+
 def send_doh_request(doh_server, domain, port):
     url = f"https://{doh_server}:{port}/dns-query"
     headers = {
@@ -40,12 +112,11 @@ def send_doh_request(doh_server, domain, port):
         "Content-Type": "application/dns-message"
     }
 
-    # Create a sample DNS query for the domain
     dns_query = create_dns_query(domain)
 
     response = requests.post(url, headers=headers,
                              data=dns_query, timeout=5)
-    return response.status_code == 200 and response.headers.get('Content-Type') == 'application/dns-message'
+    return response.status_code == 200 and is_dns_answer(response.content)
 
 
 def create_dns_query(domain):
