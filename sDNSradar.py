@@ -23,6 +23,8 @@
 # SOFTWARE.
 
 import json
+import socket
+import ssl
 import struct
 import requests
 import argparse
@@ -119,6 +121,23 @@ def send_doh_request(doh_server, domain, port):
     return response.status_code == 200 and is_dns_answer(response.content)
 
 
+def send_dot_request(dot_server, domain, port):
+    dns_query = create_dns_query(domain)
+
+    context = ssl.create_default_context()
+    with socket.create_connection((dot_server, port), timeout=5) as sock:
+        with context.wrap_socket(sock, server_hostname=dot_server) as ssock:
+            message = struct.pack('>H', len(dns_query)) + dns_query
+            ssock.sendall(message)
+
+            response_length_bytes = ssock.recv(2)
+            if not response_length_bytes:
+                return False
+            response_length = struct.unpack('>H', response_length_bytes)[0]
+            response_data = ssock.recv(response_length)
+            return len(response_data) > 0 and is_dns_answer(response_data)
+
+
 def create_dns_query(domain):
     # Create a basic DNS query packet for the domain
     query = b'\x00\x00'  # ID (transaction ID)
@@ -160,6 +179,32 @@ def check_doh_multiple_ips(endpoints, domain, results):
                 print(
                     f"{RED}[-] No valid DoH service detected at {host}:{port}{RESET}")
                 results["unsupported"].append(f"{host}:{port}")
+
+
+def check_dot_multiple_endpoints(endpoints, domain, results):
+    for host, port in endpoints:
+        print(f"{CYAN}Checking {host} on port {port} for DoT service...{RESET}")
+        try:
+            valid_dot = send_dot_request(host, domain, port)
+        except socket.timeout:
+            print(
+                f"{YELLOW}[*] Timeout connecting to {host}:{port} (DoT){RESET}")
+            results["error"].append(f"{host}:{port}")
+        except ssl.SSLError as e:
+            print(
+                f"{YELLOW}[*] SSL error with {host}:{port} (DoT): {e}{RESET}")
+            results["error"].append(f"{host}:{port}")
+        except Exception as e:
+            print(
+                f"{RED}[-] An unexpected error occurred while checking {host}:{port}: {e}{RESET}")
+            results["error"].append(f"{host}:{port}")
+        else:
+            if valid_dot:
+                print(
+                    f"{GREEN}[+] DoT service detected at {host}:{port}{RESET}")
+                results["dot"].append(f"{host}:{port}")
+            else:
+                results["unsupported"].append(f"{host}:{port} (DoT)")
 
 
 def process_endpoints(endpoints):
@@ -228,8 +273,9 @@ def main():
     except ValueError:
         parser.error("Invalid endpoints.")
 
-    results = {"doh": [], "unsupported": [], "error": []}
+    results = {"doh": [], "dot": [], "unsupported": [], "error": []}
     check_doh_multiple_ips(processed_endpoints, args.domain, results)
+    check_dot_multiple_endpoints(processed_endpoints, args.domain, results)
 
     if args.json is not None:
         if not args.json.endswith(".json"):
