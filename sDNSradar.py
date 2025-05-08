@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import json
 import requests
 import argparse
 
@@ -42,20 +43,9 @@ def send_doh_request(doh_server, domain, port):
     # Create a sample DNS query for the domain
     dns_query = create_dns_query(domain)
 
-    try:
-        response = requests.post(url, headers=headers,
-                                 data=dns_query, timeout=5)
-        if response.status_code == 200 and response.headers.get('Content-Type') == 'application/dns-message':
-            print(
-                f"{GREEN}[+] DoH service detected at {doh_server}:{port}{RESET}")
-            return True
-        else:
-            print(
-                f"{RED}[-] No valid DoH service detected at {doh_server}:{port}{RESET}")
-            return False
-    except requests.exceptions.RequestException as e:
-        print(f"{YELLOW}[*] Error contacting {doh_server}:{port}: {e}{RESET}")
-        return False
+    response = requests.post(url, headers=headers,
+                             data=dns_query, timeout=5)
+    return response.status_code == 200 and response.headers.get('Content-Type') == 'application/dns-message'
 
 
 def create_dns_query(domain):
@@ -78,10 +68,39 @@ def create_dns_query(domain):
     return query
 
 
-def check_doh_multiple_ips(ip_list, domain, port):
-    for ip in ip_list:
-        print(f"{CYAN}Checking {ip} on port {port} for DoH service...{RESET}")
-        send_doh_request(ip, domain, port)
+def check_doh_multiple_ips(endpoints, domain, results):
+    for endpoint in endpoints:
+        host, port = endpoint
+        print(f"{CYAN}Checking {host} on port {port} for DoH service...{RESET}")
+        try:
+            valid_doh = send_doh_request(host, domain, port)
+        except requests.exceptions.RequestException as e:
+            print(f"{YELLOW}[*] Error contacting {host}:{port}: {e}{RESET}")
+            results["error"].append(f"{host}:{port} (Unexpected Error)")
+        except Exception as e:
+            print(
+                f"{RED}[-] An unexpected error occurred while checking {host}:{port}: {e}{RESET}")
+            results["error"].append(f"{host}:{port} (Unexpected Error)")
+        else:
+            if valid_doh:
+                print(
+                    f"{GREEN}[+] DoH service detected at {host}:{port}{RESET}")
+                results["doh"].append(f"{host}:{port}")
+            else:
+                print(
+                    f"{RED}[-] No valid DoH service detected at {host}:{port}{RESET}")
+                results["unsupported"].append(f"{host}:{port}")
+
+
+def process_endpoints(endpoints):
+    processed_endpoints = []
+    for endpoint in endpoints:
+        parts = endpoint.split(":")
+        if len(parts) == 2 and parts[0].strip() and parts[1].isnumeric():
+            processed_endpoints.append(parts)
+        else:
+            raise ValueError("Invalid endpoints")
+    return processed_endpoints
 
 
 def main():
@@ -90,16 +109,63 @@ def main():
         epilog="Brought to you by Handshake\nVersion: 0.0.1\nMIT License",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument("servers", metavar="SERVERS", type=str, nargs="+",
-                        help="List of IP addresses to check for DoH services.")
-    parser.add_argument("-d", "--domain", default="example.com",
-                        help="Domain to query to test DoH service (default is example.com).")
-    parser.add_argument("--port", type=int, default=443,
-                        help="Port to query for DoH service (default is 443).")
+    parser.add_argument(
+        "servers",
+        metavar="SERVERS",
+        type=str,
+        nargs="*",
+        help="List of DoH endpoint addresses in the format 'host:port' (e.g., 1.1.1.1:443, cloudflare-dns.com:443).",
+    )
+    parser.add_argument(
+        "-d",
+        "--domain",
+        default="example.com",
+        help="Domain name to query for testing the DoH service (default: example.com).",
+    )
+    parser.add_argument(
+        "-iL",
+        "--input",
+        default=None,
+        help=(
+            "Path to a file containing a list of DoH endpoints (one per line). "
+            "If provided, the 'servers' argument will be ignored."
+        ),
+    )
+    parser.add_argument(
+        "-j",
+        "--json",
+        default=None,
+        help="Save the results to a JSON file"
+    )
 
     args = parser.parse_args()
 
-    check_doh_multiple_ips(args.servers, args.domain, args.port)
+    if not args.servers and args.input is None:
+        parser.error("You must specify at least one endpoint to be checked.")
+
+    if args.input:
+        try:
+            with open(args.input, 'r') as f:
+                endpoints = [line.strip() for line in f if line.strip()]
+            print(f"Checking servers from file: {args.input}")
+        except FileNotFoundError:
+            parser.error(f"Input file '{args.input}' not found.")
+    elif args.servers:
+        endpoints = args.servers
+
+    try:
+        processed_endpoints = process_endpoints(endpoints)
+    except ValueError:
+        parser.error("Invalid endpoints.")
+
+    results = {"doh": [], "unsupported": [], "error": []}
+    check_doh_multiple_ips(processed_endpoints, args.domain, results)
+
+    if args.json is not None:
+        if not args.json.endswith(".json"):
+            args.json += ".json"
+        with open(args.json, "w") as f:
+            json.dump(results, f, indent=4)
 
 
 if __name__ == "__main__":
