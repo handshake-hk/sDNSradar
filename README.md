@@ -1,5 +1,5 @@
 # sDNSradar
-A penetration testing tool to identify secure DNS (DoH) services on multiple servers. 
+A penetration testing tool to identify secure DNS (DoH & DoT) services on multiple servers. 
 
 ## Usage
 
